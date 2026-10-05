@@ -5,4 +5,6 @@ powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
 exit /b
 :run
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0remove.ps1"
+echo.
+pause
 exit /b
