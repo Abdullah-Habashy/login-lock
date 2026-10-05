@@ -12,6 +12,36 @@ if (-not $isAdmin) {
     return
 }
 
+function Set-BigConsoleFont {
+    # Bigger, clearer font (Consolas) for this console window, set at runtime.
+    if (-not ('LLFont' -as [type])) {
+        Add-Type -Namespace '' -Name 'LLFont' -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GetStdHandle(int h);
+[DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetCurrentConsoleFontEx(IntPtr h, bool max, ref FONT f);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet=System.Runtime.InteropServices.CharSet.Unicode)]
+public struct FONT {
+  public uint cbSize; public uint nFont; public short sizeX; public short sizeY;
+  public int family; public int weight;
+  [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValTStr, SizeConst=32)] public string face;
+}
+'@
+    }
+    try {
+        $h = [LLFont]::GetStdHandle(-11)   # STD_OUTPUT_HANDLE
+        $f = New-Object LLFont+FONT
+        $f.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($f)
+        $f.sizeX = 0; $f.sizeY = 30       # cell height in pixels (bigger = larger text)
+        $f.family = 54; $f.weight = 400; $f.face = 'Consolas'
+        [void][LLFont]::SetCurrentConsoleFontEx($h, $false, [ref]$f)
+    } catch {}
+    try {
+        $raw = $Host.UI.RawUI
+        $sz = $raw.WindowSize; $sz.Width = 78; $sz.Height = 30
+        $buf = $raw.BufferSize; $buf.Width = 78; if ($buf.Height -lt 300) { $buf.Height = 300 }
+        $raw.BufferSize = $buf; $raw.WindowSize = $sz
+    } catch {}
+}
+
 function Read-TimeValue($label, $default) {
     while ($true) {
         $v = Read-Host "$label (24-hour, e.g. 22:00) [$default]"
@@ -46,6 +76,7 @@ function To12Text($hhmm) {
     return '{0}:{1} {2}' -f $h12, $p[1], $ap
 }
 
+Set-BigConsoleFont
 Clear-Host
 Write-Host '===============================================' -ForegroundColor Cyan
 Write-Host '                 Login Lock' -ForegroundColor Cyan
