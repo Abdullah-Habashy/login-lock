@@ -91,9 +91,35 @@ function Write-Log($msg) {
     try { "{0:yyyy-MM-dd HH:mm:ss}  {1}" -f (Get-Date), $msg | Add-Content -Path $logFile -Encoding UTF8 } catch {}
 }
 
+# --- Telegram heartbeat ------------------------------------------------------
+# Tells the accountability friend the program is still here. A gap in these
+# (or the "removed" message) means it was deleted / the machine is off.
+$notifyFile = Join-Path $PSScriptRoot 'notify.ps1'
+$machine = $env:COMPUTERNAME
+function Send-Heartbeat($text) {
+    if (-not ($cfg.notify -and $cfg.notify.chatId -and $cfg.notify.tokenEnc)) { return }
+    if (-not (Test-Path $notifyFile)) { return }
+    . $notifyFile
+    $r = Send-TelegramMessage -TokenEnc $cfg.notify.tokenEnc -ChatId ([string]$cfg.notify.chatId) -Text $text
+    Write-Log ("telegram: " + $(if ($r.ok) { 'sent' } else { "failed - $($r.error)" }))
+}
+
+if ($cfg -and $cfg.notify -and $cfg.notify.chatId -and $cfg.notify.tokenEnc -and $decision -ne 'EXPIRED') {
+    $hours = if ($cfg.notify.heartbeatHours) { [double]$cfg.notify.heartbeatHours } else { 3 }
+    $hbFile = Join-Path $logDir 'heartbeat.txt'
+    $last = $null
+    try { if (Test-Path $hbFile) { $last = [datetime]::Parse((Get-Content $hbFile -Raw).Trim()) } } catch {}
+    if (-not $last -or ($Now - $last).TotalHours -ge $hours) {
+        $state = switch ($decision) { 'BLOCKED' { 'locked now' } 'WARN' { 'locking in 5 min' } default { 'active, not locking now' } }
+        Send-Heartbeat ("Login Lock is still on $machine. Status: $state. Schedule: $($cfg.startTime)-$($cfg.endTime), until $($cfg.endDate).")
+        try { (Get-Date $Now -Format 'o') | Set-Content -Path $hbFile -Encoding ascii } catch {}
+    }
+}
+
 switch ($decision) {
     'EXPIRED' {
         Write-Log 'schedule expired - removing task and folder'
+        Send-Heartbeat "Login Lock schedule ended on $machine and removed itself (normal end, not deleted)."
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
         # Remove the folder last; keep the log by copying nothing - it goes too.
         try { Remove-Item $logDir -Recurse -Force -ErrorAction SilentlyContinue } catch {}

@@ -76,6 +76,41 @@ function To12Text($hhmm) {
     return '{0}:{1} {2}' -f $h12, $p[1], $ap
 }
 
+# Optional: set up a Telegram heartbeat so a friend knows if the app is removed.
+# Returns @{ chatId; tokenEnc; heartbeatHours } or $null.
+function Read-NotifySetup {
+    Write-Host ''
+    $want = Read-Host 'Tell a friend on Telegram if this app is removed? (Y/N) [N]'
+    if ($want -notmatch '^(y|Y)$') { return $null }
+    . (Join-Path $PSScriptRoot 'notify.ps1')
+    Write-Host '  Create a bot in Telegram with @BotFather and copy its token.'
+    while ($true) {
+        $token = (Read-Host 'Bot token (leave blank to skip Telegram)').Trim()
+        if ([string]::IsNullOrWhiteSpace($token)) { Write-Host '  Skipped Telegram.' -ForegroundColor Yellow; return $null }
+        $t = Test-TelegramToken $token
+        if (-not $t.ok) { Write-Host "  Invalid token or no internet: $($t.error)." -ForegroundColor Yellow; continue }
+        Write-Host "  Bot OK: @$($t.botName)" -ForegroundColor Green
+        $chatId = ''
+        if ($t.chats.Count -gt 0) {
+            Write-Host '  Chats that messaged the bot:'
+            for ($i = 0; $i -lt $t.chats.Count; $i++) { Write-Host "    [$($i+1)] $($t.chats[$i].id)  $($t.chats[$i].name)" }
+            $pick = (Read-Host '  Pick a number, or type a chat id').Trim()
+            if ($pick -match '^\d+$' -and [int]$pick -ge 1 -and [int]$pick -le $t.chats.Count) { $chatId = $t.chats[[int]$pick - 1].id } else { $chatId = $pick }
+        } else {
+            Write-Host '  No one messaged the bot yet. In Telegram send any message to the bot (or add it to a group) first.'
+            $chatId = (Read-Host '  Chat id').Trim()
+        }
+        if ([string]::IsNullOrWhiteSpace($chatId)) { Write-Host '  No chat id - skipping Telegram.' -ForegroundColor Yellow; return $null }
+        $enc = Protect-Secret $token
+        $test = Send-TelegramMessage -TokenEnc $enc -ChatId ([string]$chatId) -Text "Login Lock test from $env:COMPUTERNAME - notifications are set up."
+        if ($test.ok) {
+            Write-Host '  Test message sent - check Telegram. A heartbeat will go out every 3 hours.' -ForegroundColor Green
+            return @{ chatId = [string]$chatId; tokenEnc = $enc; heartbeatHours = 3 }
+        }
+        Write-Host "  Test send failed: $($test.error)." -ForegroundColor Yellow
+    }
+}
+
 Set-BigConsoleFont
 Clear-Host
 Write-Host '===============================================' -ForegroundColor Cyan
@@ -120,8 +155,11 @@ while ($true) {
 
     $ans = Read-Host 'Activate the lock with these times? (Y = yes / anything else = redo)'
     if ($ans -match '^(y|Y)$') {
+        $notify = Read-NotifySetup
         try {
-            Install-LoginLock -Config @{ startTime = $startTime; endTime = $endTime; startDate = $startDate.ToString('yyyy-MM-dd'); endDate = $endDate.ToString('yyyy-MM-dd') } -SourceDir $PSScriptRoot
+            $cfg = @{ startTime = $startTime; endTime = $endTime; startDate = $startDate.ToString('yyyy-MM-dd'); endDate = $endDate.ToString('yyyy-MM-dd') }
+            if ($notify) { $cfg.notify = $notify }
+            Install-LoginLock -Config $cfg -SourceDir $PSScriptRoot
             Write-Host ''
             Write-Host 'OK - the lock is active.' -ForegroundColor Green
             Write-Host '  To cancel anytime: run Remove-Lock.bat as administrator.'

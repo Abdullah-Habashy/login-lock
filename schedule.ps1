@@ -16,17 +16,21 @@ function Install-LoginLock {
     # the schedule or delete the enforcer behind the lock's back.
     & icacls $script:InstallRoot /inheritance:r /grant:r 'SYSTEM:(OI)(CI)F' 'Administrators:(OI)(CI)F' /Q | Out-Null
 
-    foreach ($f in 'enforce.ps1', 'schedule.ps1', 'Remove-Lock.bat', 'RECOVERY.txt') {
+    foreach ($f in 'enforce.ps1', 'schedule.ps1', 'notify.ps1', 'remove.ps1', 'Remove-Lock.bat', 'RECOVERY.txt') {
         $src = Join-Path $SourceDir $f
         if (Test-Path $src) { Copy-Item $src (Join-Path $script:InstallRoot $f) -Force }
     }
 
-    $json = [ordered]@{
+    $data = [ordered]@{
         startTime = $Config.startTime
         endTime   = $Config.endTime
         startDate = $Config.startDate
         endDate   = $Config.endDate
-    } | ConvertTo-Json
+    }
+    # Optional Telegram notification settings (chatId, tokenEnc, heartbeatHours).
+    # Present only when the user set them up.
+    if ($Config.notify) { $data.notify = $Config.notify }
+    $json = $data | ConvertTo-Json
     # UTF-8 without BOM so ConvertFrom-Json never chokes on it.
     [IO.File]::WriteAllText((Join-Path $script:InstallRoot 'config.json'), $json, (New-Object Text.UTF8Encoding $false))
 
